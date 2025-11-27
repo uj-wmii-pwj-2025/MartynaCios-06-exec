@@ -2,10 +2,7 @@ package uj.wmii.pwj.exec;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -69,6 +66,157 @@ public class ExecServiceTest {
             throw new RuntimeException(e);
         }
     }
+
+    @Test
+    void testIsShutdownAndIsTerminated() throws Exception {
+        MyExecService s = MyExecService.newInstance();
+
+        assertFalse(s.isShutdown());
+        assertFalse(s.isTerminated());
+
+        s.shutdown();
+        assertTrue(s.isShutdown());
+
+        s.awaitTermination(1, TimeUnit.SECONDS);
+
+        assertTrue(s.isTerminated());
+    }
+
+    @Test
+    void testShutdownNow() {
+        MyExecService s = MyExecService.newInstance();
+
+        TestRunnable r1 = new TestRunnable();
+        TestRunnable r2 = new TestRunnable();
+
+        s.execute(r1);
+        s.execute(r2);
+
+        var notExecuted = s.shutdownNow();
+
+        assertNotNull(notExecuted);
+
+        assertThrows(
+                RejectedExecutionException.class,
+                () -> s.submit(new TestRunnable())
+        );
+    }
+
+    @Test
+    void testAwaitTerminationWithTask() throws Exception {
+        MyExecService s = MyExecService.newInstance();
+
+        s.execute(() -> ExecServiceTest.doSleep(50));
+
+        s.shutdown();
+
+        boolean finished = s.awaitTermination(1, TimeUnit.SECONDS);
+
+        assertTrue(finished);
+        assertTrue(s.isTerminated());
+    }
+
+    @Test
+    void testInvokeAll() throws Exception {
+        MyExecService s = MyExecService.newInstance();
+
+        StringCallable c1 = new StringCallable("A", 10);
+        StringCallable c2 = new StringCallable("B", 20);
+        StringCallable c3 = new StringCallable("C", 5);
+
+        var tasks = java.util.List.of(c1, c2, c3);
+
+        var futures = s.invokeAll(tasks);
+
+        assertEquals(3, futures.size());
+
+        for (Future<String> f : futures) {
+            assertTrue(f.isDone());
+        }
+
+        assertEquals("A", futures.get(0).get());
+        assertEquals("B", futures.get(1).get());
+        assertEquals("C", futures.get(2).get());
+    }
+
+    @Test
+    void testInvokeAllWithTimeout() throws Exception {
+        MyExecService s = MyExecService.newInstance();
+
+        StringCallable c1 = new StringCallable("FAST", 10);
+        StringCallable c2 = new StringCallable("SLOW1", 200);
+        StringCallable c3 = new StringCallable("SLOW2", 200);
+
+        var tasks = java.util.List.of(c1, c2, c3);
+
+        var futures = s.invokeAll(tasks, 50, TimeUnit.MILLISECONDS);
+
+        assertEquals(3, futures.size());
+
+        assertTrue(futures.get(0).isDone());
+
+    }
+
+    @Test
+    void testInvokeAny() throws Exception {
+        MyExecService s = MyExecService.newInstance();
+
+        StringCallable fast = new StringCallable("WINNER", 5);
+        StringCallable slow = new StringCallable("LOSER", 50);
+
+        var tasks = java.util.List.of(fast, slow);
+
+        String result = s.invokeAny(tasks);
+
+        assertEquals("WINNER", result);
+    }
+
+    @Test
+    void testInvokeAnyAllFail() {
+        MyExecService s = MyExecService.newInstance();
+
+        Callable<String> bad1 = () -> { throw new RuntimeException("BAD1"); };
+        Callable<String> bad2 = () -> { throw new RuntimeException("BAD2"); };
+
+        var tasks = java.util.List.of(bad1, bad2);
+
+        assertThrows(ExecutionException.class, () -> s.invokeAny(tasks));
+    }
+
+    @Test
+    void testInvokeAnyWithTimeout() {
+        MyExecService s = MyExecService.newInstance();
+
+        StringCallable slow = new StringCallable("TOO SLOW", 200);
+
+        var tasks = java.util.List.of(slow);
+
+        assertThrows(
+                TimeoutException.class,
+                () -> s.invokeAny(tasks, 50, TimeUnit.MILLISECONDS)
+        );
+    }
+
+    @Test
+    void testSubmitRunnableReturnsDoneFuture() throws Exception {
+        MyExecService s = MyExecService.newInstance();
+        TestRunnable r = new TestRunnable();
+
+        Future<?> f = s.submit(r);
+
+        doSleep(10);
+
+        assertTrue(r.wasRun);
+        assertTrue(f.isDone());
+        assertNull(f.get());
+    }
+
+
+
+
+
+
+
 
 }
 
